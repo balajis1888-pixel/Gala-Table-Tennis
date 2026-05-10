@@ -1,65 +1,161 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>Gala Table Tennis</title>
+    <title>GALA TABLE TENNIS: ELECTRIFIED</title>
     <style>
-        body { margin: 0; background: #000; color: gold; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; font-family: sans-serif; }
-        canvas { border: 2px solid #333; background: #05070a; max-width: 90vw; max-height: 80vh; }
-        #ui { margin-top: 20px; }
-        button { padding: 10px 20px; cursor: pointer; background: gold; border: none; font-weight: bold; border-radius: 5px; }
+        body { margin: 0; background: #020408; display: flex; justify-content: center; align-items: center; height: 100vh; width: 100vw; overflow: hidden; font-family: 'Orbitron', sans-serif; }
+        #scaler { display: flex; flex-direction: column; align-items: center; transform-origin: center; }
+        #game-container { position: relative; background: #000; border: 4px solid #1a1a1a; border-radius: 8px; width: 600px; height: 800px; box-shadow: 0 0 50px rgba(0,0,0,0.5); }
+        canvas { cursor: none; display: block; }
+        #ui { display: flex; gap: 10px; background: rgba(10,10,10,0.95); padding: 10px; border-radius: 0 0 10px 10px; border: 1px solid #333; width: 580px; justify-content: center; margin-top: -2px; }
+        input { width: 100px; background: transparent; color: #ffd700; border: none; border-bottom: 1px solid #ffd700; text-align: center; font-family: 'Orbitron'; font-size: 11px; outline: none; }
+        button { cursor: pointer; background: #ffd700; border: none; color: #000; padding: 6px 15px; border-radius: 20px; font-weight: 900; font-size: 11px; text-transform: uppercase; transition: 0.2s; }
+        button:hover { background: #fff; transform: scale(1.05); }
+        #startOverlay, #endOverlay, #closedOverlay { position: absolute; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.95); z-index: 2000; display: flex; flex-direction: column; justify-content: center; align-items: center; border-radius: 8px; text-align: center; }
+        #startOverlay h2, #endOverlay h2, #closedOverlay h2 { color: gold; margin-bottom: 20px; letter-spacing: 4px; text-shadow: 0 0 15px gold; }
+        .menu-btn { margin: 10px; padding: 15px 40px; font-size: 16px; width: 280px; border-radius: 50px; border: none; cursor: pointer; font-family: 'Orbitron'; font-weight: 900; }
+        .restart-btn { background: #00ff88; color: #000; box-shadow: 0 0 20px rgba(0,255,136,0.4); }
+        .close-btn { background: #ff4444; color: white; }
+        #endOverlay, #closedOverlay { display: none; }
     </style>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div id="status">ARENA STANDBY</div>
-    <canvas id="gCanvas" width="600" height="800"></canvas>
-    <div id="ui"><button id="startBtn">START GAME</button></div>
-
+    <div id="scaler">
+        <div id="game-container">
+            <div id="startOverlay">
+                <h2>GALA ARENA</h2>
+                <button id="unlockAudio" class="menu-btn restart-btn">INITIALIZE SYSTEM</button>
+            </div>
+            <div id="endOverlay">
+                <h2 id="winnerText">MATCH OVER</h2>
+                <button id="replayBtn" class="menu-btn restart-btn">NEW MATCH</button>
+                <button id="closeBtn" class="menu-btn close-btn">SHUTDOWN</button>
+            </div>
+            <div id="closedOverlay">
+                <h2>SYSTEM OFFLINE</h2>
+                <button id="reopenBtn" class="menu-btn restart-btn">RE-BOOT SYSTEM</button>
+            </div>
+            <canvas id="gameCanvas"></canvas>
+        </div>
+        <div id="ui">
+            <input type="text" id="p1Name" value="CHAMPION">
+            <input type="text" id="p2Name" value="ELITE AI">
+            <button id="modeBtn">AI: ON</button>
+            <button id="muteBtn">MUSIC: ON</button>
+        </div>
+    </div>
 <script>
-const canvas = document.getElementById('gCanvas');
+const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
-const startBtn = document.getElementById('startBtn');
-const statusDiv = document.getElementById('status');
+const scaler = document.getElementById('scaler');
+const endOverlay = document.getElementById('endOverlay');
+const closedOverlay = document.getElementById('closedOverlay');
+const startOverlay = document.getElementById('startOverlay');
+const winnerText = document.getElementById('winnerText');
+canvas.width = 600; canvas.height = 800;
 
-let ball = { x: 300, y: 400, vx: 4, vy: 4 };
-let p1X = 300;
-let active = false;
+function resize() {
+    const scale = Math.min((window.innerHeight * 0.85) / 800, (window.innerWidth * 0.95) / 600);
+    scaler.style.transform = `scale(${scale})`;
+}
+window.addEventListener('resize', resize);
+resize();
 
-startBtn.onclick = () => { 
-    active = true; 
-    statusDiv.innerText = "SYSTEM ACTIVE";
-    startBtn.style.display = 'none';
-};
+const T_Y_TOP = 180, T_Y_BOT = 620, T_Y_MID = 400;
+const T_WIDTH_TOP = 360, T_WIDTH_BOT = 450;
+const PLAYER_SPEED = 9, CONST_SPEED = 6.5;
 
-window.onmousemove = (e) => {
-    let rect = canvas.getBoundingClientRect();
-    p1X = e.clientX - rect.left;
-};
+let ball, p1X = 300, p2X = 300, p1Score = 0, p2Score = 0, isAI = true;
+let totalPoints = 0, gameActive = false, musicEnabled = true, audioCtx = null;
+const keys = {};
 
-function loop() {
-    ctx.fillStyle = '#05070a';
-    ctx.fillRect(0, 0, 600, 800);
+function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playSfx(f, t, d, v) {
+    if (!audioCtx || !musicEnabled) return;
+    const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+    o.type = t; o.frequency.setValueAtTime(f, audioCtx.currentTime);
+    g.gain.setValueAtTime(v, audioCtx.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + d);
+    o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + d);
+}
+
+function resetBall() {
+    ball = { x: 300, y: T_Y_MID, vx: (Math.random()-0.5)*6, vy: (totalPoints%2===0)?-CONST_SPEED:CONST_SPEED, size: 7 };
+}
+
+function start() {
+    p1Score = 0; p2Score = 0; totalPoints = 0; gameActive = true;
+    resetBall();
+    startOverlay.style.display = 'none';
+    endOverlay.style.display = 'none';
+    closedOverlay.style.display = 'none';
+}
+
+document.getElementById('unlockAudio').onclick = () => { initAudio(); start(); };
+document.getElementById('replayBtn').onclick = start;
+document.getElementById('reopenBtn').onclick = start;
+document.getElementById('closeBtn').onclick = () => { gameActive = false; endOverlay.style.display = 'none'; closedOverlay.style.display = 'flex'; };
+document.getElementById('modeBtn').onclick = function() { isAI = !isAI; this.innerText = isAI ? "AI: ON" : "AI: OFF"; };
+document.getElementById('muteBtn').onclick = function() { musicEnabled = !musicEnabled; this.innerText = musicEnabled ? "MUSIC: ON" : "MUSIC: OFF"; };
+
+window.onkeydown = (e) => keys[e.key.toLowerCase()] = true;
+window.onkeyup = (e) => keys[e.key.toLowerCase()] = false;
+
+function update() {
+    if (!gameActive) return;
+    ball.x += ball.vx; ball.y += ball.vy;
     
-    if (active) {
-        ball.x += ball.vx;
-        ball.y += ball.vy;
-        if (ball.x < 0 || ball.x > 600) ball.vx *= -1;
-        if (ball.y < 0 || ball.y > 800) ball.vy *= -1;
-        
-        // Simple paddle collision
-        if (ball.y > 750 && Math.abs(ball.x - p1X) < 50) ball.vy *= -1;
+    let prog = (ball.y - T_Y_TOP)/(T_Y_BOT - T_Y_TOP);
+    let halfW = (T_WIDTH_TOP + prog*(T_WIDTH_BOT-T_WIDTH_TOP))/2;
+    if (ball.x < 300-halfW || ball.x > 300+halfW) { ball.vx *= -1.05; playSfx(150, 'sine', 0.1, 0.1); }
+    
+    if (ball.vy > 0 && ball.y > T_Y_BOT-10 && Math.abs(ball.x - p1X) < 60) {
+        ball.vy = -CONST_SPEED; ball.vx = (ball.x - p1X)*0.3; playSfx(400, 'triangle', 0.1, 0.2);
+    }
+    if (ball.vy < 0 && ball.y < T_Y_TOP+10 && Math.abs(ball.x - p2X) < 60) {
+        ball.vy = CONST_SPEED; ball.vx = (ball.x - p2X)*0.3; playSfx(300, 'triangle', 0.1, 0.2);
     }
 
-    ctx.fillStyle = 'white';
-    ctx.beginPath();
-    ctx.arc(ball.x, ball.y, 10, 0, 7);
-    ctx.fill();
+    if (ball.y < 50) { p1Score++; totalPoints++; resetBall(); }
+    if (ball.y > 750) { p2Score++; totalPoints++; resetBall(); }
+    
+    if ((p1Score >= 11 || p2Score >= 11) && Math.abs(p1Score-p2Score) >= 2) {
+        gameActive = false; winnerText.innerText = p1Score > p2Score ? "CHAMPION WINS" : "AI DOMINANCE";
+        endOverlay.style.display = 'flex';
+    }
 
-    ctx.fillStyle = 'blue';
-    ctx.fillRect(p1X - 50, 760, 100, 15);
-
-    requestAnimationFrame(loop);
+    if (keys['a'] || keys['arrowleft']) p1X -= PLAYER_SPEED;
+    if (keys['d'] || keys['arrowright']) p1X += PLAYER_SPEED;
+    p1X = Math.max(150, Math.min(450, p1X));
+    if (isAI) p2X += (ball.x - p2X) * 0.12;
+    p2X = Math.max(180, Math.min(420, p2X));
 }
+
+function draw() {
+    ctx.fillStyle = '#05070a'; ctx.fillRect(0, 0, 600, 800);
+    ctx.fillStyle = '#0a3d62'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(300 - T_WIDTH_TOP/2, T_Y_TOP); ctx.lineTo(300 + T_WIDTH_TOP/2, T_Y_TOP);
+    ctx.lineTo(300 + T_WIDTH_BOT/2, T_Y_BOT); ctx.lineTo(300 - T_WIDTH_BOT/2, T_Y_BOT);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.beginPath(); ctx.moveTo(100, T_Y_MID); ctx.lineTo(500, T_Y_MID); ctx.stroke();
+    
+    if (gameActive) {
+        ctx.fillStyle = '#fff'; ctx.shadowBlur = 10; ctx.shadowColor = '#fff';
+        ctx.beginPath(); ctx.arc(ball.x, ball.y, 8, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+        ctx.fillStyle = '#00ff88'; ctx.fillRect(p1X-30, T_Y_BOT+5, 60, 10);
+        ctx.fillStyle = '#ff4444'; ctx.fillRect(p2X-30, T_Y_TOP-15, 60, 10);
+    }
+    ctx.fillStyle = 'gold'; ctx.font = '900 30px Orbitron'; ctx.textAlign = 'center';
+    ctx.fillText(`${p2Score} - ${p1Score}`, 300, 80);
+}
+
+function loop() { update(); draw(); requestAnimationFrame(loop); }
 loop();
 </script>
 </body>
